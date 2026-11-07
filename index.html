@@ -2,9 +2,267 @@
 <html lang="sv">
 <head>
     <meta charset="UTF-8">
-    <title>Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retro Spel - Flerspelare</title>
+    <!-- Vi laddar in PeerJS för koppling mellan spelare utan egen server -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { background: #181a20; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; margin: 0; padding: 20px; }
+        #menu { background: #23272a; max-width: 400px; margin: 40px auto; padding: 20px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+        input, button { padding: 10px; margin: 8px 0; width: 85%; border-radius: 6px; border: 1px solid #444; background: #2c2f33; color: #fff; font-size: 16px; }
+        button { background: #7289da; border: none; cursor: pointer; font-weight: bold; }
+        button:hover { background: #5b6eae; }
+        #game-container { display: none; margin-top: 20px; }
+        canvas { background: #2f3136; border: 4px solid #7289da; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); max-width: 100%; height: auto; }
+        #chat-box { max-width: 600px; margin: 10px auto; display: flex; gap: 10px; }
+        #chat-input { flex: 1; }
+    </style>
 </head>
 <body>
-    <h1>Hej!</h1>
+
+    <!-- MENY FÖR ATT STARTA / GÅ MED -->
+    <div id="menu">
+        <h2>Skapa eller Gå med i Rum</h2>
+        <input type="text" id="username" placeholder="Ditt användarnamn" value="Spelare"><br>
+        <input type="color" id="usercolor" value="#7289da" style="width: 85%; height: 40px; border: none; cursor: pointer;"><br>
+        <button onclick="createRoom()">Skapa nytt rum</button>
+        <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
+        <input type="text" id="room-id-input" placeholder="Klistra in Rums-ID här">
+        <button onclick="joinRoom()">Gå med i rum</button>
+        <p id="status" style="font-size: 14px; color: #aaa;"></p>
+    </div>
+
+    <!-- SPELVYN -->
+    <div id="game-container">
+        <h3 id="room-info">Rums-ID: <span id="my-id" style="color: #7289da; user-select: all;">Laddar...</span></h3>
+        <p style="font-size: 13px; color: #aaa;">Klicka varsomhelst i rummet för att gå dit!</p>
+        <canvas id="gameCanvas" width="600" height="400"></canvas>
+        <div id="chat-box">
+            <input type="text" id="chat-input" placeholder="Skriv ett meddelande..." onkeydown="checkSend(event)">
+            <button onclick="sendMessage()" style="width: 100px;">Skicka</button>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let peer = null;
+    let conn = null;
+    let myId = '';
+    let isHost = false;
+
+    // Spelardata
+    let myData = {
+        id: '',
+        name: 'Spelare',
+        x: 300,
+        y: 200,
+        targetX: 300,
+        targetY: 200,
+        color: '#7289da',
+        message: '',
+        msgTimer: 0
+    };
+
+    let otherPlayers = {}; // Håller koll på anslutna spelare
+
+    function createRoom() {
+        initPlayerInfo();
+        peer = new Peer(); // Skapar en unik koppling via PeerJS molnserver
+        
+        peer.on('open', (id) => {
+            myId = id;
+            isHost = true;
+            document.getElementById('my-id').innerText = id;
+            startMenuToGame();
+        });
+
+        peer.on('connection', (connection) => {
+            conn = connection;
+            setupConnection();
+        });
+    }
+
+    function joinRoom() {
+        const targetId = document.getElementById('room-id-input'].value.trim();
+        if(!targetId) { alert("Skriv in ett rums-id först!"); return; }
+        
+        initPlayerInfo();
+        peer = new Peer();
+
+        peer.on('open', (id) => {
+            myId = id;
+            isHost = false;
+            document.getElementById('my-id').innerText = targetId;
+            
+            conn = peer.connect(targetId);
+            setupConnection();
+            startMenuToGame();
+        });
+    }
+
+    function initPlayerInfo() {
+        myData.name = document.getElementById('username').value || 'Anonym';
+        myData.color = document.getElementById('usercolor').value;
+    }
+
+    function startMenuToGame() {
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('game-container').style.display = 'block';
+        requestAnimationFrame(gameLoop);
+    }
+
+    function setupConnection() {
+        conn.on('open', () => {
+            document.getElementById('status').innerText = "Ansluten!";
+            // Skicka direkt vår info till den andra
+            sendData({ type: 'JOIN', player: myData });
+        });
+
+        conn.on('data', (data) => {
+            handleNetworkData(data);
+        });
+    }
+
+    function sendData(data) {
+        if(conn && conn.open) {
+            conn.send(data);
+        }
+    }
+
+    function handleNetworkData(data) {
+        if(data.type === 'JOIN' || data.type === 'UPDATE') {
+            otherPlayers[data.player.id] = data.player;
+            if(data.type === 'JOIN' && isHost) {
+                // Om vi är host, skicka tillbaka vår info så nya spelaren ser oss
+                sendData({ type: 'UPDATE', player: myData });
+            }
+        } else if(data.type === 'CHAT') {
+            if(otherPlayers[data.id]) {
+                otherPlayers[data.id].message = data.msg;
+                otherPlayers[data.id].msgTimer = 300; // Visas i ~5 sekunder
+            }
+        }
+    }
+
+    // Klicka för att gå
+    canvas.addEventListener('click', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        myData.targetX = e.clientX - rect.left;
+        myData.targetY = e.clientY - rect.top;
+    });
+
+    // Touch för mobil
+    canvas.addEventListener('touchstart', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const touch = e.touches[0];
+        myData.targetX = touch.clientX - rect.left;
+        myData.targetY = touch.clientY - rect.top;
+        e.preventDefault();
+    });
+
+    function sendMessage() {
+        const input = document.getElementById('chat-input');
+        const msg = input.value.trim();
+        if(!msg) return;
+
+        myData.message = msg;
+        myData.msgTimer = 300;
+        input.value = '';
+
+        sendData({ type: 'CHAT', id: myId, msg: msg });
+    }
+
+    function checkSend(e) {
+        if(e.key === 'Enter') sendMessage();
+    }
+
+    // Huvudloop för spelet (körs ~60 gånger per sekund)
+    function gameLoop() {
+        // 1. Flytta mjukt mot målet (interpolation)
+        let dx = myData.targetX - myData.x;
+        let dy = myData.targetY - myData.y;
+        if(Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+            myData.x += dx * 0.1;
+            myData.y += dy * 0.1;
+            // Skicka uppdaterad position till andra spelaren
+            sendData({ type: 'UPDATE', player: myData });
+        }
+
+        // 2. Rita ut rummet
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Rita golvmönster (rutnät i Habbo-stil)
+        ctx.strokeStyle = '#36393f';
+        ctx.lineWidth = 1;
+        for(let i=0; i<canvas.width; i+=40) {
+            ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+        }
+        for(let j=0; j<canvas.height; j+=40) {
+            ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(canvas.width, j); ctx.stroke();
+        }
+
+        // 3. Rita ut oss själva
+        drawAvatar(myData);
+
+        // 4. Rita ut andra spelare
+        for(let id in otherPlayers) {
+            let p = otherPlayers[id];
+            // Mjukflytt även för andra spelaren om position ändras
+            let pdx = p.targetX - p.x;
+            let pdy = p.targetY - p.y;
+            p.x += pdx * 0.1;
+            p.y += pdy * 0.1;
+            drawAvatar(p);
+        }
+
+        requestAnimationFrame(gameLoop);
+    }
+
+    function drawAvatar(p) {
+        // Skugga
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y + 15, 12, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Kropp / Tröja
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x - 10, p.y - 10, 20, 25);
+
+        // Huvud
+        ctx.fillStyle = '#ffdbac';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 18, 10, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Namnskylt
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.name, p.x, p.y - 32);
+
+        // Chattbubbla
+        if(p.msgTimer > 0) {
+            p.msgTimer--;
+            ctx.fillStyle = 'white';
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 2;
+            
+            let textWidth = ctx.measureText(p.message).width;
+            let boxWidth = Math.max(textWidth + 20, 40);
+            
+            ctx.beginPath();
+            ctx.roundRect(p.x - boxWidth/2, p.y - 75, boxWidth, 30, 6);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = '#000';
+            ctx.fillText(p.message, p.x, p.y - 55);
+        }
+    }
+</script>
+
 </body>
 </html>
