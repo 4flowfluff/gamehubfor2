@@ -9,13 +9,14 @@
     <style>
         body { background: #181a20; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; margin: 0; padding: 20px; }
         #menu { background: #23272a; max-width: 400px; margin: 40px auto; padding: 20px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
-        input, button { padding: 10px; margin: 8px 0; width: 85%; border-radius: 6px; border: 1px solid #444; background: #2c2f33; color: #fff; font-size: 16px; }
+        input, button { padding: 10px; margin: 8px 0; width: 85%; border-radius: 6px; border: 1px solid #444; background: #2c2f33; color: #fff; font-size: 16px; box-sizing: border-box; }
         button { background: #7289da; border: none; cursor: pointer; font-weight: bold; }
         button:hover { background: #5b6eae; }
         #game-container { display: none; margin-top: 20px; }
         canvas { background: #2f3136; border: 4px solid #7289da; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); max-width: 100%; height: auto; }
         #chat-box { max-width: 600px; margin: 10px auto; display: flex; gap: 10px; }
         #chat-input { flex: 1; }
+        #room-id-input { font-size: 20px; letter-spacing: 2px; text-align: center; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -27,14 +28,14 @@
         <input type="color" id="usercolor" value="#7289da" style="width: 85%; height: 40px; border: none; cursor: pointer;"><br>
         <button onclick="createRoom()">Skapa nytt rum</button>
         <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
-        <input type="text" id="room-id-input" placeholder="Klistra in Rums-ID här">
+        <input type="number" id="room-id-input" placeholder="t.ex. 7356" maxlength="4">
         <button onclick="joinRoom()">Gå med i rum</button>
         <p id="status" style="font-size: 14px; color: #aaa;"></p>
     </div>
 
     <!-- SPELVYN -->
     <div id="game-container">
-        <h3 id="room-info">Rums-ID: <span id="my-id" style="color: #7289da; user-select: all;">Laddar...</span></h3>
+        <h3 id="room-info">Rums-ID: <span id="my-id" style="color: #7289da; font-weight: bold; font-size: 24px; user-select: all;">Laddar...</span></h3>
         <p style="font-size: 13px; color: #aaa;">Klicka varsomhelst i rummet för att gå dit!</p>
         <canvas id="gameCanvas" width="600" height="400"></canvas>
         <div id="chat-box">
@@ -66,10 +67,17 @@
 
     let otherPlayers = {};
 
+    // Hjälpfunktion för att generera en 4-siffrig kod (1000 - 9999)
+    function generateShortCode() {
+        return Math.floor(1000 + Math.random() * 9000).toString();
+    }
+
     function createRoom() {
         initPlayerInfo();
-        // Viktigt: secure: true och port 443 för att fungera över HTTPS (GitHub Pages)
-        peer = new Peer({
+        const shortId = generateShortCode();
+        
+        // Skapa rum med den korta koden som ID
+        peer = new Peer(shortId, {
             secure: true,
             port: 443
         });
@@ -82,7 +90,12 @@
         });
 
         peer.on('error', (err) => {
-            alert("Kunde inte ansluta till anslutningsservern: " + err.type);
+            if(err.type === 'unavailable-id') {
+                // Om koden mot förmodan redan var upptagen, testa igen!
+                createRoom();
+            } else {
+                alert("Kunde inte ansluta till servern: " + err.type);
+            }
         });
 
         peer.on('connection', (connection) => {
@@ -93,7 +106,7 @@
 
     function joinRoom() {
         const targetId = document.getElementById('room-id-input').value.trim();
-        if(!targetId) { alert("Skriv in ett rums-id först!"); return; }
+        if(!targetId) { alert("Skriv in en 4-siffrig rumskod först!"); return; }
         
         initPlayerInfo();
         peer = new Peer({
@@ -112,7 +125,7 @@
         });
 
         peer.on('error', (err) => {
-            alert("Kunde inte ansluta till anslutningsservern: " + err.type);
+            alert("Kunde inte hitta rummet eller ansluta: " + err.type);
         });
     }
 
