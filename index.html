@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Retro Spel - Flerspelare</title>
-    <!-- Vi laddar in PeerJS för koppling mellan spelare utan egen server -->
+    <!-- Vi laddar in PeerJS -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { background: #181a20; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; margin: 0; padding: 20px; }
@@ -52,7 +52,6 @@
     let myId = '';
     let isHost = false;
 
-    // Spelardata
     let myData = {
         id: '',
         name: 'Spelare',
@@ -65,17 +64,25 @@
         msgTimer: 0
     };
 
-    let otherPlayers = {}; // Håller koll på anslutna spelare
+    let otherPlayers = {};
 
     function createRoom() {
         initPlayerInfo();
-        peer = new Peer(); // Skapar en unik koppling via PeerJS molnserver
+        // Viktigt: secure: true och port 443 för att fungera över HTTPS (GitHub Pages)
+        peer = new Peer({
+            secure: true,
+            port: 443
+        });
         
         peer.on('open', (id) => {
             myId = id;
             isHost = true;
             document.getElementById('my-id').innerText = id;
             startMenuToGame();
+        });
+
+        peer.on('error', (err) => {
+            alert("Kunde inte ansluta till anslutningsservern: " + err.type);
         });
 
         peer.on('connection', (connection) => {
@@ -85,11 +92,14 @@
     }
 
     function joinRoom() {
-        const targetId = document.getElementById('room-id-input'].value.trim();
+        const targetId = document.getElementById('room-id-input').value.trim();
         if(!targetId) { alert("Skriv in ett rums-id först!"); return; }
         
         initPlayerInfo();
-        peer = new Peer();
+        peer = new Peer({
+            secure: true,
+            port: 443
+        });
 
         peer.on('open', (id) => {
             myId = id;
@@ -99,6 +109,10 @@
             conn = peer.connect(targetId);
             setupConnection();
             startMenuToGame();
+        });
+
+        peer.on('error', (err) => {
+            alert("Kunde inte ansluta till anslutningsservern: " + err.type);
         });
     }
 
@@ -116,7 +130,6 @@
     function setupConnection() {
         conn.on('open', () => {
             document.getElementById('status').innerText = "Ansluten!";
-            // Skicka direkt vår info till den andra
             sendData({ type: 'JOIN', player: myData });
         });
 
@@ -135,25 +148,22 @@
         if(data.type === 'JOIN' || data.type === 'UPDATE') {
             otherPlayers[data.player.id] = data.player;
             if(data.type === 'JOIN' && isHost) {
-                // Om vi är host, skicka tillbaka vår info så nya spelaren ser oss
                 sendData({ type: 'UPDATE', player: myData });
             }
         } else if(data.type === 'CHAT') {
             if(otherPlayers[data.id]) {
                 otherPlayers[data.id].message = data.msg;
-                otherPlayers[data.id].msgTimer = 300; // Visas i ~5 sekunder
+                otherPlayers[data.id].msgTimer = 300;
             }
         }
     }
 
-    // Klicka för att gå
     canvas.addEventListener('click', (e) => {
         const rect = canvas.getBoundingClientRect();
         myData.targetX = e.clientX - rect.left;
         myData.targetY = e.clientY - rect.top;
     });
 
-    // Touch för mobil
     canvas.addEventListener('touchstart', (e) => {
         const rect = canvas.getBoundingClientRect();
         const touch = e.touches[0];
@@ -178,22 +188,17 @@
         if(e.key === 'Enter') sendMessage();
     }
 
-    // Huvudloop för spelet (körs ~60 gånger per sekund)
     function gameLoop() {
-        // 1. Flytta mjukt mot målet (interpolation)
         let dx = myData.targetX - myData.x;
         let dy = myData.targetY - myData.y;
         if(Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
             myData.x += dx * 0.1;
             myData.y += dy * 0.1;
-            // Skicka uppdaterad position till andra spelaren
             sendData({ type: 'UPDATE', player: myData });
         }
 
-        // 2. Rita ut rummet
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Rita golvmönster (rutnät i Habbo-stil)
         ctx.strokeStyle = '#36393f';
         ctx.lineWidth = 1;
         for(let i=0; i<canvas.width; i+=40) {
@@ -203,13 +208,10 @@
             ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(canvas.width, j); ctx.stroke();
         }
 
-        // 3. Rita ut oss själva
         drawAvatar(myData);
 
-        // 4. Rita ut andra spelare
         for(let id in otherPlayers) {
             let p = otherPlayers[id];
-            // Mjukflytt även för andra spelaren om position ändras
             let pdx = p.targetX - p.x;
             let pdy = p.targetY - p.y;
             p.x += pdx * 0.1;
@@ -221,29 +223,24 @@
     }
 
     function drawAvatar(p) {
-        // Skugga
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
         ctx.beginPath();
         ctx.arc(p.x, p.y + 15, 12, 0, Math.PI * 2);
         ctx.fill();
 
-        // Kropp / Tröja
         ctx.fillStyle = p.color;
         ctx.fillRect(p.x - 10, p.y - 10, 20, 25);
 
-        // Huvud
         ctx.fillStyle = '#ffdbac';
         ctx.beginPath();
         ctx.arc(p.x, p.y - 18, 10, 0, Math.PI * 2);
         ctx.fill();
 
-        // Namnskylt
         ctx.fillStyle = '#fff';
         ctx.font = '12px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(p.name, p.x, p.y - 32);
 
-        // Chattbubbla
         if(p.msgTimer > 0) {
             p.msgTimer--;
             ctx.fillStyle = 'white';
